@@ -13,6 +13,7 @@ namespace Piwik\Plugins\CustomOptOut;
 use Piwik\Common;
 use Piwik\Db;
 use Piwik\Nonce;
+use Piwik\Plugin\ControllerAdmin;
 use Piwik\Plugins\LanguagesManager\LanguagesManager;
 use Piwik\Plugins\SitesManager\API as APISiteManager;
 use Piwik\Plugins\LanguagesManager\API as APILanguagesManager;
@@ -25,7 +26,7 @@ use Piwik\Site;
  *
  * @package CustomOptOut
  */
-class Controller extends \Piwik\Plugin\ControllerAdmin
+class Controller extends ControllerAdmin
 {
 
     public function index()
@@ -33,7 +34,9 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         Piwik::checkUserHasSomeAdminAccess();
 
         if($_SERVER['REQUEST_METHOD'] == 'POST') {
-            $postedSiteData = Common::getRequestVar('site', array(), 'array');
+
+            // Cannot use Common::getRequestVar, because the function remove whitespaces and newline breaks
+            $postedSiteData = isset($_POST['site']) ? $_POST['site'] : null;
 
             if(is_array($postedSiteData) && count($postedSiteData) > 0) {
                 foreach($postedSiteData as $id => $site) {
@@ -42,7 +45,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
                         continue;
                     }
 
-                    API::getInstance()->saveSite($id, Common::unsanitizeInputValue($site['css']), Common::unsanitizeInputValue($site['file']));
+                    API::getInstance()->saveSite($id, $site['css'], $site['file']);
                 }
 
                 // Redirect to, clear POST vars
@@ -53,7 +56,17 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
 
         $view = new View('@CustomOptOut/index.twig');
         Site::clearCache();
-        if (Piwik::isUserIsSuperUser()) {
+
+        // Piwik >= 2.1
+        if(method_exists('Piwik\Piwik', 'hasUserSuperUserAccess')) {
+            $superUserAccess = Piwik::hasUserSuperUserAccess();
+
+        // Piwik < 2.1
+        } else {
+            $superUserAccess = Piwik::isUserIsSuperUser();
+        }
+
+        if ($superUserAccess) {
             $sitesRaw = APISiteManager::getInstance()->getAllSites();
         } else {
             $sitesRaw = APISiteManager::getInstance()->getSitesWithAdminAccess();
@@ -90,6 +103,10 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
 
         $siteId = Common::getRequestVar('idSite', 0, 'integer');
         $site = API::getInstance()->getSiteDataId($siteId);
+
+        if(!$site) {
+            throw new \Exception('Website was not found!');
+        }
 
         if ($nonce !== false && Nonce::verifyNonce('Piwik_OptOut', $nonce)) {
             Nonce::discardNonce('Piwik_OptOut');
